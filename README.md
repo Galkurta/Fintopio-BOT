@@ -61,7 +61,7 @@ Follow these steps to get the Fintopio Automation Tool up and running:
    Start the Fintopio Automation Tool with:
 
    ```bash
-   node fin.js
+   node main.js
    ```
 
 5. **Enjoy the show!**
