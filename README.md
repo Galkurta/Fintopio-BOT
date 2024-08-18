@@ -47,7 +47,7 @@ Follow these steps to get the Fintopio Automation Tool up and running:
 
 3. **Set up your accounts**
 
-   Create a file named `data.txt` in the project root directory. Add your Fintopio account data, one per line, in the following format:
+   Edit`data.txt`. Add your Fintopio account data, one per line, in the following format:
 
    ```
    user=
