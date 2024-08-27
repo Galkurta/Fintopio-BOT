@@ -1,2 +1,2 @@
 query_id=
-user=
+query_id=
