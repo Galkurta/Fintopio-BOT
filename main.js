@@ -26,13 +26,13 @@ class Fintopio {
     console.log(msg[color]);
   }
 
-  async waitWithCountdown(seconds) {
+  async waitWithCountdown(seconds, msg = 'continue') {
     const spinners = ["|", "/", "-", "\\"];
     let i = 0;
     for (let s = seconds; s >= 0; s--) {
       readline.cursorTo(process.stdout, 0);
       process.stdout.write(
-        `${spinners[i]} Waiting ${s} seconds to continue ${spinners[i]}`.cyan
+        `${spinners[i]} Waiting ${s} seconds to ${msg} ${spinners[i]}`.cyan
       );
       i = (i + 1) % spinners.length;
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -278,7 +278,8 @@ class Fintopio {
 
             const diamond = await this.getDiamondInfo(token);
             if(diamond.state === 'available') {
-                await this.claimDiamond(token, diamond.diamondNumber, diamond.settings.totalReward);
+              await this.waitWithCountdown(Math.floor(Math.random() * (21 - 10)) + 10, 'claim Diamonds');
+              await this.claimDiamond(token, diamond.diamondNumber, diamond.settings.totalReward);
             } else {
                 const nextDiamondTimeStamp = diamond.timings.nextAt;
                 if(nextDiamondTimeStamp) {
