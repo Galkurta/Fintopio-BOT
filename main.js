@@ -144,6 +144,89 @@ class Fintopio {
     }
   }
 
+  async getDiamondInfo(token){
+    const url = `${this.baseUrl}/clicker/diamond/state`;
+    const headers = {
+        ...this.headers,
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+    };
+
+    try {
+        const response = await axios.get(url, { headers });
+        return response.data;
+      } catch (error) {
+        this.log(`Error fetching diamond state: ${error.message}`, "red");
+        return null;
+    }
+  }
+
+  async claimDiamond(token, diamondNumber, totalReward) {
+    const url = `${this.baseUrl}/clicker/diamond/complete`;
+    const headers = {
+        ...this.headers,
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+    };
+    const payload = { "diamondNumber": diamondNumber };
+
+    try {
+        await axios.post(url, payload, { headers });
+        this.log(`Success claim ${totalReward} diamonds!`, "green");
+      } catch (error) {
+        this.log(`Error claiming Diamond: ${error.message}`, "red");
+      }
+  }
+
+  async getTask(token) {
+    const url = `${this.baseUrl}/hold/tasks`;
+    const headers = {
+        ...this.headers,
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+    };
+
+    try {
+        const response = await axios.get(url, { headers });
+        return response.data;
+      } catch (error) {
+        this.log(`Error fetching task state: ${error.message}`, "red");
+        return null;
+    }
+  }
+
+  async startTask(token, taskId, slug) {
+    const url = `${this.baseUrl}/hold/tasks/${taskId}/start`;
+    const headers = {
+        ...this.headers,
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+        "origin": "https://fintopio-tg.fintopio.com"
+    };
+    try {
+        await axios.post(url, {}, { headers });
+        this.log(`Starting task ${slug}!`, "green");
+      } catch (error) {
+        this.log(`Error starting task: ${error.message}`, "red");
+    }
+    }
+
+    async claimTask(token, taskId, slug, rewardAmount) {
+        const url = `${this.baseUrl}/hold/tasks/${taskId}/claim`;
+        const headers = {
+            ...this.headers,
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json; charset=utf-8",
+            "origin": "https://fintopio-tg.fintopio.com"
+        };
+        try {
+            await axios.post(url, {}, { headers });
+            this.log(`Task ${slug} complete, reward ${rewardAmount} diamonds!`, "green");
+          } catch (error) {
+            this.log(`Error claiming task: ${error.message}`, "red");
+        }
+    }
+
   extractFirstName(userData) {
     try {
       const userPart = userData.match(/user=([^&]*)/)[1];
@@ -167,6 +250,7 @@ class Fintopio {
   }
 
   async main() {
+
     while (true) {
       const dataFile = path.join(__dirname, "data.txt");
       const data = await fs.readFile(dataFile, "utf8");
@@ -192,6 +276,23 @@ class Fintopio {
 
             await this.checkInDaily(token);
 
+            const diamond = await this.getDiamondInfo(token);
+            if(diamond.state === 'available') {
+                await this.claimDiamond(token, diamond.diamondNumber, diamond.settings.totalReward);
+            } else {
+                const nextDiamondTimeStamp = diamond.timings.nextAt;
+                if(nextDiamondTimeStamp) {
+                    const nextDiamondTime = DateTime.fromMillis(
+                        nextDiamondTimeStamp
+                    ).toLocaleString(DateTime.DATETIME_FULL);
+                    this.log(`Next Diamond time: ${nextDiamondTime}`, 'green');
+
+                    if (i === 0) {
+                        firstAccountFinishTime = nextDiamondTimeStamp;
+                    }
+                }
+            }
+
             const farmingState = await this.getFarmingState(token);
 
             if (farmingState) {
@@ -208,9 +309,9 @@ class Fintopio {
                   ).toLocaleString(DateTime.DATETIME_FULL);
                   this.log(`Farming completion time: ${finishTime}`, "green");
 
-                  if (i === 0) {
-                    firstAccountFinishTime = finishTimestamp;
-                  }
+                //   if (i === 0) {
+                //     firstAccountFinishTime = finishTimestamp;
+                //   }
 
                   const currentTime = DateTime.now().toMillis();
                   if (currentTime > finishTimestamp) {
@@ -219,6 +320,22 @@ class Fintopio {
                   }
                 }
               }
+            }
+
+            const taskState = await this.getTask(token);
+
+            if(taskState) {
+                for (const item of taskState.tasks) {
+                    if(item.status === 'available') {
+                        await this.startTask(token, item.id, item.slug);
+                    } else if(item.status === 'verified') {
+                        await this.claimTask(token, item.id, item.slug, item.rewardAmount);
+                    } else if(item.status === 'in-progress') {
+                        continue;
+                    } else {
+                        this.log(`Veryfing task ${item.slug}!`, "green");
+                    }
+                }
             }
           }
         }
