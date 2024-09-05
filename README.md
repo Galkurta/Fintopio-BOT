@@ -15,7 +15,7 @@ Welcome to the Fintopio Automation Tool! This colorful and efficient Node.js app
 
 Before you can use this tool, you need to have a Fintopio account. If you don't have one yet, you can register using the following link:
 
-[👉 Register for Fintopio](https://fintop.io/UzJESJtj)
+[👉 Register for Fintopio](https://fintop.io/UzJLNvue)
 
 Make sure to complete the registration process and set up your account before proceeding with the setup of this automation tool.
 
