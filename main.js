@@ -29,13 +29,26 @@ class Fintopio {
   async waitWithCountdown(seconds, msg = "continue") {
     const spinners = ["|", "/", "-", "\\"];
     let i = 0;
+    let hours = Math.floor(seconds / 3600);
+    let minutes = Math.floor((seconds % 3600) / 60);
+    let remainingSeconds = seconds % 60;
     for (let s = seconds; s >= 0; s--) {
       readline.cursorTo(process.stdout, 0);
       process.stdout.write(
-        `${spinners[i]} Waiting ${s} seconds to ${msg} ${spinners[i]}`.cyan
+        `${spinners[i]} Waiting ${hours}h ${minutes}m ${remainingSeconds}s to ${msg} ${spinners[i]}`
+          .cyan
       );
       i = (i + 1) % spinners.length;
       await new Promise((resolve) => setTimeout(resolve, 1000));
+      remainingSeconds--;
+      if (remainingSeconds < 0) {
+        remainingSeconds = 59;
+        minutes--;
+        if (minutes < 0) {
+          minutes = 59;
+          hours--;
+        }
+      }
     }
     console.log("");
   }
@@ -268,11 +281,7 @@ class Fintopio {
       for (let i = 0; i < users.length; i++) {
         const userData = users[i];
         const first_name = this.extractFirstName(userData);
-        console.log(
-          `${"=".repeat(5)} Account ${i + 1} | ${first_name.green} ${"=".repeat(
-            5
-          )}`.blue
-        );
+        console.log(`[ Account ${i + 1} | ${first_name} ]`);
         const token = await this.auth(userData);
         if (token) {
           this.log(`Login successful!`, "green");
