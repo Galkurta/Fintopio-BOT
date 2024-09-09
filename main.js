@@ -292,20 +292,20 @@ class Fintopio {
 
             await this.checkInDaily(token);
 
-            const diamond = await this.getDiamondInfo(token);
-            if (diamond.state === "available") {
-              await this.waitWithCountdown(
-                Math.floor(Math.random() * (21 - 10)) + 10,
-                "claim Diamonds"
-              );
-              await this.claimDiamond(
-                token,
-                diamond.diamondNumber,
-                diamond.settings.totalReward
-              );
-            } else {
-              const nextDiamondTimeStamp = diamond.timings.nextAt;
-              if (nextDiamondTimeStamp) {
+            try {
+              const diamond = await this.getDiamondInfo(token);
+              if (diamond && diamond.state === "available") {
+                await this.waitWithCountdown(
+                  Math.floor(Math.random() * (21 - 10)) + 10,
+                  "claim Diamonds"
+                );
+                await this.claimDiamond(
+                  token,
+                  diamond.diamondNumber,
+                  diamond.settings.totalReward
+                );
+              } else if (diamond && diamond.timings && diamond.timings.nextAt) {
+                const nextDiamondTimeStamp = diamond.timings.nextAt;
                 const nextDiamondTime = DateTime.fromMillis(
                   nextDiamondTimeStamp
                 ).toLocaleString(DateTime.DATETIME_FULL);
@@ -314,7 +314,14 @@ class Fintopio {
                 if (i === 0) {
                   firstAccountFinishTime = nextDiamondTimeStamp;
                 }
+              } else {
+                this.log("Unable to process diamond info", "yellow");
               }
+            } catch (error) {
+              this.log(
+                `Error processing diamond info: ${error.message}`,
+                "red"
+              );
             }
 
             const farmingState = await this.getFarmingState(token);
