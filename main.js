@@ -118,29 +118,35 @@ class Fintopio {
   }
 
   // Farming Methods
-  async handleFarming(token) {
-    const farmingState = await this.getFarmingState(token);
-    if (!farmingState) return;
-
-    if (farmingState.state === "idling") {
-      await this.startFarming(token);
-    } else if (["farmed", "farming"].includes(farmingState.state)) {
-      const finishTimestamp = farmingState.timings.finish;
-      if (finishTimestamp) {
-        await this.handleFarmingCompletion(token, finishTimestamp);
-      }
-    }
-  }
-
   async getFarmingState(token) {
     try {
       const response = await axios.get(`${this.config.baseUrl}/farming/state`, {
-        headers: { ...this.config.headers, Authorization: `Bearer ${token}` },
+        headers: {
+          ...this.config.headers,
+          Authorization: `Bearer ${token}`,
+        },
       });
       return response.data;
     } catch (error) {
       logger.error(`Error fetching farming state: ${error.message}`);
       return null;
+    }
+  }
+
+  async handleFarming(token) {
+    const farmingState = await this.getFarmingState(token);
+    if (!farmingState) return;
+
+    if (farmingState.state === "idling") {
+      const startDelay = this.generateRandomTime();
+      logger.info(`Generated random wait time: ${startDelay} seconds`);
+      await this.waitWithCountdown(startDelay, "start Farming", false);
+      await this.startFarming(token);
+    } else if (["farmed", "farming"].includes(farmingState.state)) {
+      const finishTimestamp = farmingState.timings?.finish;
+      if (finishTimestamp) {
+        await this.handleFarmingCompletion(token, finishTimestamp);
+      }
     }
   }
 
@@ -152,7 +158,15 @@ class Fintopio {
 
     const currentTime = DateTime.now().toMillis();
     if (currentTime > finishTimestamp) {
+      const claimDelay = this.generateRandomTime();
+      logger.info(`Generated random wait time: ${claimDelay} seconds`);
+      await this.waitWithCountdown(claimDelay, "claim Farming", false);
       await this.claimFarming(token);
+
+      // Add delay before starting new farming
+      const startDelay = this.generateRandomTime();
+      logger.info(`Generated random wait time: ${startDelay} seconds`);
+      await this.waitWithCountdown(startDelay, "start new Farming", false);
       await this.startFarming(token);
     }
   }
@@ -171,7 +185,7 @@ class Fintopio {
         }
       );
 
-      const finishTimestamp = response.data.timings.finish;
+      const finishTimestamp = response.data.timings?.finish;
       if (finishTimestamp) {
         const finishTime = DateTime.fromMillis(finishTimestamp).toLocaleString(
           DateTime.DATETIME_FULL
