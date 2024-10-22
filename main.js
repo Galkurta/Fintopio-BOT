@@ -4,6 +4,7 @@ const axios = require("axios");
 const { DateTime } = require("luxon");
 const printBanner = require("./config/banner");
 const logger = require("./config/logger");
+const FakeDataGenerator = require("./config/fakeData");
 
 class Fintopio {
   constructor() {
@@ -380,6 +381,14 @@ class Fintopio {
   }
 
   // Helper Methods
+  formatUserAgent(userAgent) {
+    const match = userAgent.match(/Android [^;]+; ([^)]+)/);
+    if (match) {
+      return match[0];
+    }
+    return userAgent.substring(0, 30) + "...";
+  }
+
   formatLeaderboardInfo(position, level, type) {
     const formattedPosition = this.formatPosition(position);
     return level
@@ -453,9 +462,23 @@ class Fintopio {
 
   // Main Process
   async processAccount(userData, accountIndex) {
+    const fakeData = FakeDataGenerator.generateFakeData();
+    this.config = {
+      baseUrl: "https://fintopio-tg.fintopio.com/api",
+      headers: fakeData.headers,
+    };
+
     const first_name = this.extractFirstName(userData);
     const last_name = this.extractLastName(userData);
     logger.info(`${first_name} ${last_name}`);
+
+    logger.info("Device Configuration:");
+    logger.info(`> Model: ${fakeData.deviceInfo.deviceModel}`);
+    logger.info(`> Platform: ${fakeData.deviceInfo.platform}`);
+    logger.info(`> Screen: ${fakeData.deviceInfo.screenResolution}`);
+    logger.info(`> GPU: ${fakeData.deviceInfo.webGLVendor}`);
+    logger.info(`> Fingerprint: ${fakeData.fingerprint.substring(0, 8)}...`);
+    logger.info(`> UA: ${this.formatUserAgent(fakeData.userAgent)}`);
 
     const token = await this.auth(userData);
     if (!token) return;

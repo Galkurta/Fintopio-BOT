@@ -11,7 +11,9 @@
   "description": "",
   "dependencies": {
     "axios": "^1.7.4",
+    "fingerprintjs2": "^2.1.4",
     "luxon": "^3.5.0",
+    "user-agents": "^1.1.335",
     "winston": "^3.15.0"
   }
 }
