@@ -291,7 +291,14 @@ class Fintopio {
     const taskState = await this.getTask(token);
     if (!taskState) return;
 
-    for (const item of taskState.tasks) {
+    // Filter out telegram-boost tasks
+    const filteredTasks = taskState.tasks.filter(
+      (task) =>
+        !task.slug.includes("telegram-boost") &&
+        !(task.type === "social" && task.subtype === "boost")
+    );
+
+    for (const item of filteredTasks) {
       if (item.status === "available") {
         await this.startTask(token, item.id, item.slug);
       } else if (item.status === "verified") {
@@ -395,6 +402,14 @@ class Fintopio {
   }
 
   // Helper Methods
+  formatGemRarity(rarity) {
+    return rarity.toUpperCase();
+  }
+
+  formatGemName(name) {
+    return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+  }
+
   formatUserAgent(userAgent) {
     const match = userAgent.match(/Android [^;]+; ([^)]+)/);
     if (match) {
@@ -474,6 +489,38 @@ class Fintopio {
     return Math.max(duration.as("milliseconds"), 5000); // Minimum 5 seconds wait
   }
 
+  async getGemsInventory(token) {
+    try {
+      const response = await axios.get(
+        `${this.config.baseUrl}/hold/inventory/gems`,
+        {
+          headers: {
+            ...this.config.headers,
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return response.data?.gems || [];
+    } catch (error) {
+      logger.error(`Error fetching gems inventory: ${error.message}`);
+      return null;
+    }
+  }
+
+  async displayGemsInventory(token) {
+    const gems = await this.getGemsInventory(token);
+    if (!gems) return null;
+
+    return gems
+      .filter((gem) => parseInt(gem.count) > 0)
+      .map((gem) => ({
+        ...gem,
+        name: this.formatGemName(gem.name),
+        rarity: this.formatGemRarity(gem.rarity),
+      }));
+  }
+
   // Main Process
   async processAccount(userData, accountIndex) {
     const fakeData = FakeDataGenerator.generateFakeData();
@@ -484,20 +531,23 @@ class Fintopio {
 
     const first_name = this.extractFirstName(userData);
     const last_name = this.extractLastName(userData);
-    logger.info(`${first_name} ${last_name}`);
 
-    logger.info("Device Configuration:");
+    // Header section
+    logger.info(`[ Account ${accountIndex + 1} | ${first_name} ${last_name} ]`);
+    logger.info("━━━━━━━━━ Device Info ━━━━━━━━━");
     logger.info(`> Model: ${fakeData.deviceInfo.deviceModel}`);
     logger.info(`> Platform: ${fakeData.deviceInfo.platform}`);
     logger.info(`> Screen: ${fakeData.deviceInfo.screenResolution}`);
     logger.info(`> GPU: ${fakeData.deviceInfo.webGLVendor}`);
     logger.info(`> Fingerprint: ${fakeData.fingerprint.substring(0, 8)}...`);
     logger.info(`> UA: ${this.formatUserAgent(fakeData.userAgent)}`);
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     const token = await this.auth(userData);
     if (!token) return;
 
     logger.info("Login successful!");
+
     const [profile, leaderboards] = await Promise.all([
       this.getProfile(token),
       this.getLeaderboards(token),
@@ -505,10 +555,24 @@ class Fintopio {
 
     if (!profile) return;
 
+    // Account Info section
     logger.info(`Balance: ${this.formatNumber(profile.balance)}`);
 
+    // Gems section
+    const gems = await this.displayGemsInventory(token);
+    if (gems) {
+      logger.info("━━━━━━━━━ Gems Info ━━━━━━━━━");
+      gems.forEach((gem) => {
+        logger.info(
+          `> ${gem.name} | Rarity: ${gem.rarity} | Count: ${gem.count}`
+        );
+      });
+      logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    }
+
+    // Leaderboard section
     if (leaderboards) {
-      // Referral Titans (All-time)
+      logger.info("━━━━━━━━ Leaderboards ━━━━━━━━");
       const allTimeData = leaderboards.allTime?.user;
       if (allTimeData?.position) {
         logger.info(
@@ -520,7 +584,6 @@ class Fintopio {
         );
       }
 
-      // Solo Legends (Weekly)
       const weekData = leaderboards.week?.user;
       if (weekData?.position) {
         logger.info(
@@ -532,7 +595,6 @@ class Fintopio {
         );
       }
 
-      // Solo Legends (Monthly)
       const monthData = leaderboards.month?.user;
       if (monthData?.position) {
         logger.info(
@@ -543,14 +605,23 @@ class Fintopio {
           )
         );
       }
+      logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     }
 
+    // Daily Activities section
+    logger.info("━━━━━━━━ Daily Activities ━━━━━━━━");
+
+    // Do daily check-in first
     await this.checkInDaily(token);
+
+    // Then handle other activities in parallel
     await Promise.all([
       this.handleDiamonds(token, accountIndex === 0),
       this.handleFarming(token),
       this.handleTasks(token),
     ]);
+
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   }
 
   async main() {
