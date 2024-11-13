@@ -2,35 +2,106 @@ const fs = require("fs").promises;
 const path = require("path");
 const axios = require("axios");
 const { DateTime } = require("luxon");
-const printBanner = require("./config/banner");
+const displayBanner = require("./config/banner");
 const logger = require("./config/logger");
+const colors = require("./config/colors");
 const FakeDataGenerator = require("./config/fakeData");
+
+// =================== Configuration Constants ===================
+const API_CONFIG = {
+  BASE_URL: "https://fintopio-tg.fintopio.com/api",
+  ENDPOINTS: {
+    AUTH: "/auth/telegram",
+    PROFILE: "/referrals/data",
+    DAILY_CHECKIN: "/daily-checkins",
+    FARMING: {
+      STATE: "/farming/state",
+      FARM: "/farming/farm",
+      CLAIM: "/farming/claim",
+    },
+    DIAMOND: {
+      STATE: "/clicker/diamond/state",
+      COMPLETE: "/clicker/diamond/complete",
+    },
+    SPACE_TAPPER: {
+      SETTINGS: "/hold/space-tappers/game-settings",
+      SUBMIT_RESULT: "/hold/space-tappers/add-new-result",
+    },
+    TASKS: {
+      LIST: "/hold/tasks",
+      START: (id) => `/hold/tasks/${id}/start`,
+      CLAIM: (id) => `/hold/tasks/${id}/claim`,
+    },
+    LEADERBOARD: {
+      ALL_TIME: "/hold/leaderboard?range=all",
+      WEEK: "/hold/leaderboard?range=week",
+      MONTH: "/hold/leaderboard?range=month",
+    },
+    INVENTORY: {
+      GEMS: "/hold/inventory/gems",
+    },
+  },
+  DEFAULT_HEADERS: {
+    Accept: "application/json, text/plain, */*",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Language": "en-US,en;q=0.9",
+    Referer: "https://fintopio-tg.fintopio.com/",
+    "Sec-Ch-Ua":
+      '"Not/A)Brand";v="99", "Google Chrome";v="115", "Chromium";v="115"',
+    "Sec-Ch-Ua-Mobile": "?1",
+    "Sec-Ch-Ua-Platform": '"Android"',
+  },
+};
+
+const TIME_CONFIG = {
+  SPACE_TAPPER: {
+    MIN_GAMES: 1,
+    MAX_GAMES: 10,
+    PLAY_TIME: {
+      MIN: 20,
+      MAX: 45,
+    },
+    WAIT_TIME: {
+      MIN: 30,
+      MAX: 120,
+    },
+    BETWEEN_GAMES: {
+      MIN: 180,
+      MAX: 300,
+    },
+    SCORE: {
+      MIN_PERCENT: 70,
+      MAX_PERCENT: 95,
+    },
+  },
+  RANDOM_DELAY: {
+    MIN: 10,
+    MAX: 60,
+    NOISE: 2,
+  },
+};
+
+const FORMATTING = {
+  DATE_FORMAT: "YYYY-MM-DD HH:mm:ss",
+  BORDERS: {
+    HEADER: "━━━━━━━━━",
+    SECTION: "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  },
+};
 
 class Fintopio {
   constructor() {
-    // API Configuration
     this.config = {
-      baseUrl: "https://fintopio-tg.fintopio.com/api",
-      headers: {
-        Accept: "application/json, text/plain, */*",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Accept-Language": "en-US,en;q=0.9",
-        Referer: "https://fintopio-tg.fintopio.com/",
-        "Sec-Ch-Ua":
-          '"Not/A)Brand";v="99", "Google Chrome";v="115", "Chromium";v="115"',
-        "Sec-Ch-Ua-Mobile": "?1",
-        "Sec-Ch-Ua-Platform": '"Android"',
-        "User-Agent":
-          "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Mobile Safari/537.36",
-      },
+      baseUrl: API_CONFIG.BASE_URL,
+      headers: API_CONFIG.DEFAULT_HEADERS,
     };
 
-    // State Management
     this.state = {
       firstAccountFinishTime: null,
     };
   }
 
+  // =================== Utility Methods ===================
   async waitWithCountdown(seconds, msg = "continue", showCountdown = true) {
     const formatTime = (secs) => {
       const hours = Math.floor(secs / 3600);
@@ -43,41 +114,55 @@ class Fintopio {
     };
 
     const endTime = DateTime.now().plus({ seconds });
+    logger.info(`${colors.timerCount}Waiting ${msg}...${colors.reset}`);
 
-    logger.info(`Waiting ${msg}...`);
     while (DateTime.now() < endTime) {
       const remaining = endTime.diff(DateTime.now()).as("seconds");
       if (remaining <= 0) break;
 
       if (showCountdown) {
-        process.stdout.write(`\rTime remaining: ${formatTime(remaining)}`);
+        process.stdout.write(
+          `${colors.timerCount}\rTime remaining: ${formatTime(remaining)}${
+            colors.reset
+          }`
+        );
       }
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
+
     if (showCountdown) {
       process.stdout.write("\r\x1b[K"); // Clear the line
     }
   }
 
-  // Authentication Methods
+  generateRandomTime() {
+    const { MIN, MAX, NOISE } = TIME_CONFIG.RANDOM_DELAY;
+    const baseTime = Math.floor(Math.random() * (MAX - MIN + 1)) + MIN;
+    const noise = Math.random() < 0.5 ? -NOISE : NOISE;
+    return Math.max(MIN, Math.min(MAX, baseTime + noise));
+  }
+
+  // =================== Authentication Methods ===================
   async auth(userData) {
     try {
       const response = await axios.get(
-        `${this.config.baseUrl}/auth/telegram?${userData}`,
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.AUTH}?${userData}`,
         { headers: { ...this.config.headers, Webapp: "true" } }
       );
       return response.data.token;
     } catch (error) {
-      logger.error(`Authentication error: ${error.message}`);
+      logger.error(
+        `${colors.error}Authentication error: ${error.message}${colors.reset}`
+      );
       return null;
     }
   }
 
-  // Profile Methods
+  // =================== Profile Methods ===================
   async getProfile(token) {
     try {
       const response = await axios.get(
-        `${this.config.baseUrl}/referrals/data`,
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.PROFILE}`,
         {
           headers: {
             ...this.config.headers,
@@ -88,16 +173,18 @@ class Fintopio {
       );
       return response.data;
     } catch (error) {
-      logger.error(`Error fetching profile: ${error.message}`);
+      logger.error(
+        `${colors.error}Error fetching profile: ${error.message}${colors.reset}`
+      );
       return null;
     }
   }
 
-  // Check-in Methods
+  // =================== Check-in Methods ===================
   async checkInDaily(token) {
     try {
       const response = await axios.post(
-        `${this.config.baseUrl}/daily-checkins`,
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.DAILY_CHECKIN}`,
         {},
         {
           headers: {
@@ -109,26 +196,39 @@ class Fintopio {
       );
 
       const { dailyReward, totalDays } = response.data;
-      logger.info("Daily check-in successful!");
-      logger.info(`Daily Reward: ${dailyReward}`);
-      logger.info(`Total Days Check-in: ${totalDays}`);
+      logger.success(
+        `${colors.taskComplete}Daily check-in successful!${colors.reset}`
+      );
+      logger.info(
+        `${colors.faucetSuccess}Daily Reward: ${dailyReward}${colors.reset}`
+      );
+      logger.info(
+        `${colors.accountInfo}Total Days Check-in: ${totalDays}${colors.reset}`
+      );
     } catch (error) {
-      logger.error(`Daily check-in error: ${error.message}`);
+      logger.error(
+        `${colors.error}Daily check-in error: ${error.message}${colors.reset}`
+      );
     }
   }
 
-  // Farming Methods
+  // =================== Farming Methods ===================
   async getFarmingState(token) {
     try {
-      const response = await axios.get(`${this.config.baseUrl}/farming/state`, {
-        headers: {
-          ...this.config.headers,
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await axios.get(
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.FARMING.STATE}`,
+        {
+          headers: {
+            ...this.config.headers,
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
       return response.data;
     } catch (error) {
-      logger.error(`Error fetching farming state: ${error.message}`);
+      logger.error(
+        `${colors.error}Error fetching farming state: ${error.message}${colors.reset}`
+      );
       return null;
     }
   }
@@ -139,7 +239,9 @@ class Fintopio {
 
     if (farmingState.state === "idling") {
       const startDelay = this.generateRandomTime();
-      logger.info(`Generated random wait time: ${startDelay} seconds`);
+      logger.info(
+        `${colors.timerWarn}Generated random wait time: ${startDelay} seconds${colors.reset}`
+      );
       await this.waitWithCountdown(startDelay, "start Farming", false);
       await this.startFarming(token);
     } else if (["farmed", "farming"].includes(farmingState.state)) {
@@ -154,18 +256,23 @@ class Fintopio {
     const finishTime = DateTime.fromMillis(finishTimestamp).toLocaleString(
       DateTime.DATETIME_FULL
     );
-    logger.info(`Farming completion time: ${finishTime}`);
+    logger.info(
+      `${colors.timerCount}Farming completion time: ${finishTime}${colors.reset}`
+    );
 
     const currentTime = DateTime.now().toMillis();
     if (currentTime > finishTimestamp) {
       const claimDelay = this.generateRandomTime();
-      logger.info(`Generated random wait time: ${claimDelay} seconds`);
+      logger.info(
+        `${colors.timerWarn}Generated random wait time: ${claimDelay} seconds${colors.reset}`
+      );
       await this.waitWithCountdown(claimDelay, "claim Farming", false);
       await this.claimFarming(token);
 
-      // Add delay before starting new farming
       const startDelay = this.generateRandomTime();
-      logger.info(`Generated random wait time: ${startDelay} seconds`);
+      logger.info(
+        `${colors.timerWarn}Generated random wait time: ${startDelay} seconds${colors.reset}`
+      );
       await this.waitWithCountdown(startDelay, "start new Farming", false);
       await this.startFarming(token);
     }
@@ -174,7 +281,7 @@ class Fintopio {
   async startFarming(token) {
     try {
       const response = await axios.post(
-        `${this.config.baseUrl}/farming/farm`,
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.FARMING.FARM}`,
         {},
         {
           headers: {
@@ -190,18 +297,22 @@ class Fintopio {
         const finishTime = DateTime.fromMillis(finishTimestamp).toLocaleString(
           DateTime.DATETIME_FULL
         );
-        logger.info("Starting farm...");
-        logger.info(`Farming completion time: ${finishTime}`);
+        logger.success(`${colors.taskComplete}Starting farm...${colors.reset}`);
+        logger.info(
+          `${colors.timerCount}Farming completion time: ${finishTime}${colors.reset}`
+        );
       }
     } catch (error) {
-      logger.error(`Error starting farming: ${error.message}`);
+      logger.error(
+        `${colors.error}Error starting farming: ${error.message}${colors.reset}`
+      );
     }
   }
 
   async claimFarming(token) {
     try {
       await axios.post(
-        `${this.config.baseUrl}/farming/claim`,
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.FARMING.CLAIM}`,
         {},
         {
           headers: {
@@ -211,47 +322,21 @@ class Fintopio {
           },
         }
       );
-      logger.info("Farm claimed successfully!");
+      logger.success(
+        `${colors.taskComplete}Farm claimed successfully!${colors.reset}`
+      );
     } catch (error) {
-      logger.error(`Error claiming farm: ${error.message}`);
+      logger.error(
+        `${colors.error}Error claiming farm: ${error.message}${colors.reset}`
+      );
     }
   }
 
-  // Diamond Methods
-  async handleDiamonds(token, isFirstAccount) {
-    try {
-      const diamond = await this.getDiamondInfo(token);
-      if (!diamond) return;
-
-      if (diamond.state === "available") {
-        const randomWaitTime = this.generateRandomTime();
-        logger.info(`Generated random wait time: ${randomWaitTime} seconds`);
-
-        await this.waitWithCountdown(randomWaitTime, "claim Diamonds", false);
-        await this.claimDiamond(
-          token,
-          diamond.diamondNumber,
-          diamond.settings.totalReward
-        );
-      } else if (diamond.timings?.nextAt) {
-        const nextDiamondTime = DateTime.fromMillis(
-          diamond.timings.nextAt
-        ).toLocaleString(DateTime.DATETIME_FULL);
-        logger.info(`Next Diamond time: ${nextDiamondTime}`);
-
-        if (isFirstAccount) {
-          this.state.firstAccountFinishTime = diamond.timings.nextAt;
-        }
-      }
-    } catch (error) {
-      logger.error(`Error processing diamond info: ${error.message}`);
-    }
-  }
-
-  async getDiamondInfo(token) {
+  // =================== Space Tapper Methods ===================
+  async getSpaceTapperSettings(token) {
     try {
       const response = await axios.get(
-        `${this.config.baseUrl}/clicker/diamond/state`,
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.SPACE_TAPPER.SETTINGS}`,
         {
           headers: {
             ...this.config.headers,
@@ -260,18 +345,20 @@ class Fintopio {
           },
         }
       );
-      return response.data?.state ? response.data : null;
+      return response.data;
     } catch (error) {
-      logger.error(`Error fetching diamond state: ${error.message}`);
+      logger.error(
+        `${colors.error}Error fetching space tapper settings: ${error.message}${colors.reset}`
+      );
       return null;
     }
   }
 
-  async claimDiamond(token, diamondNumber, totalReward) {
+  async submitSpaceTapperResult(token, score = 0) {
     try {
-      await axios.post(
-        `${this.config.baseUrl}/clicker/diamond/complete`,
-        { diamondNumber },
+      const response = await axios.post(
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.SPACE_TAPPER.SUBMIT_RESULT}`,
+        { score },
         {
           headers: {
             ...this.config.headers,
@@ -280,18 +367,104 @@ class Fintopio {
           },
         }
       );
-      logger.info(`Success claim ${totalReward} diamonds!`);
+
+      const actualReward = response.data.actualReward;
+      logger.success(
+        `${colors.taskComplete}Space Tapper completed with score: ${score}${colors.reset}`
+      );
+      logger.info(
+        `${colors.faucetSuccess}Received reward: ${actualReward} diamonds${colors.reset}`
+      );
+      return true;
     } catch (error) {
-      logger.error(`Error claiming Diamond: ${error.message}`);
+      logger.error(
+        `${colors.error}Error submitting space tapper result: ${error.message}${colors.reset}`
+      );
+      return false;
     }
   }
 
-  // Task Methods
+  async handleSpaceTapper(token) {
+    try {
+      const settings = await this.getSpaceTapperSettings(token);
+      if (!settings) return;
+
+      const gamesToPlay =
+        Math.floor(Math.random() * TIME_CONFIG.SPACE_TAPPER.MAX_GAMES) +
+        TIME_CONFIG.SPACE_TAPPER.MIN_GAMES;
+      logger.info(
+        `${colors.taskInProgress}Will play Space Tapper ${gamesToPlay} times${colors.reset}`
+      );
+
+      for (let i = 0; i < gamesToPlay; i++) {
+        const startDelay =
+          Math.floor(
+            Math.random() *
+              (TIME_CONFIG.SPACE_TAPPER.WAIT_TIME.MAX -
+                TIME_CONFIG.SPACE_TAPPER.WAIT_TIME.MIN +
+                1)
+          ) + TIME_CONFIG.SPACE_TAPPER.WAIT_TIME.MIN;
+        logger.info(
+          `${colors.taskInProgress}Game ${
+            i + 1
+          }/${gamesToPlay} Waiting ${startDelay} seconds before playing...${
+            colors.reset
+          }`
+        );
+        await this.waitWithCountdown(startDelay, "start Space Tapper", false);
+
+        const playTime =
+          Math.floor(
+            Math.random() *
+              (TIME_CONFIG.SPACE_TAPPER.PLAY_TIME.MAX -
+                TIME_CONFIG.SPACE_TAPPER.PLAY_TIME.MIN +
+                1)
+          ) + TIME_CONFIG.SPACE_TAPPER.PLAY_TIME.MIN;
+        logger.info(
+          `${colors.timerCount}Playing Space Tapper for ${playTime} seconds...${colors.reset}`
+        );
+        await this.waitWithCountdown(playTime, "complete Space Tapper", false);
+
+        const score = this.generateRandomScore(settings.maxScore);
+        await this.submitSpaceTapperResult(token, score);
+
+        if (i < gamesToPlay - 1) {
+          const betweenGamesDelay =
+            Math.floor(
+              Math.random() *
+                (TIME_CONFIG.SPACE_TAPPER.BETWEEN_GAMES.MAX -
+                  TIME_CONFIG.SPACE_TAPPER.BETWEEN_GAMES.MIN +
+                  1)
+            ) + TIME_CONFIG.SPACE_TAPPER.BETWEEN_GAMES.MIN;
+          logger.info(
+            `${colors.timerWarn}Waiting ${betweenGamesDelay} seconds before next game...${colors.reset}`
+          );
+          await this.waitWithCountdown(
+            betweenGamesDelay,
+            "next Space Tapper game",
+            false
+          );
+        }
+      }
+    } catch (error) {
+      logger.error(
+        `${colors.error}Error in Space Tapper handler: ${error.message}${colors.reset}`
+      );
+    }
+  }
+
+  generateRandomScore(maxScore) {
+    const { MIN_PERCENT, MAX_PERCENT } = TIME_CONFIG.SPACE_TAPPER.SCORE;
+    const percentage =
+      Math.random() * (MAX_PERCENT - MIN_PERCENT) + MIN_PERCENT;
+    return Math.floor((maxScore * percentage) / 100);
+  }
+
+  // =================== Task Methods ===================
   async handleTasks(token) {
     const taskState = await this.getTask(token);
     if (!taskState) return;
 
-    // Filter out telegram-boost tasks
     const filteredTasks = taskState.tasks.filter(
       (task) =>
         !task.slug.includes("telegram-boost") &&
@@ -306,23 +479,30 @@ class Fintopio {
       } else if (item.status === "in-progress") {
         continue;
       } else {
-        logger.info(`Verifying task ${item.slug}!`);
+        logger.info(
+          `${colors.taskInProgress}Verifying task ${item.slug}!${colors.reset}`
+        );
       }
     }
   }
 
   async getTask(token) {
     try {
-      const response = await axios.get(`${this.config.baseUrl}/hold/tasks`, {
-        headers: {
-          ...this.config.headers,
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
+      const response = await axios.get(
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.TASKS.LIST}`,
+        {
+          headers: {
+            ...this.config.headers,
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
       return response.data;
     } catch (error) {
-      logger.error(`Error fetching task state: ${error.message}`);
+      logger.error(
+        `${colors.error}Error fetching task state: ${error.message}${colors.reset}`
+      );
       return null;
     }
   }
@@ -330,7 +510,7 @@ class Fintopio {
   async startTask(token, taskId, slug) {
     try {
       await axios.post(
-        `${this.config.baseUrl}/hold/tasks/${taskId}/start`,
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.TASKS.START(taskId)}`,
         {},
         {
           headers: {
@@ -341,16 +521,20 @@ class Fintopio {
           },
         }
       );
-      logger.info(`Starting task ${slug}!`);
+      logger.success(
+        `${colors.taskComplete}Starting task ${slug}!${colors.reset}`
+      );
     } catch (error) {
-      logger.error(`Error starting task: ${error.message}`);
+      logger.error(
+        `${colors.error}Error starting task: ${error.message}${colors.reset}`
+      );
     }
   }
 
   async claimTask(token, taskId, slug, rewardAmount) {
     try {
       await axios.post(
-        `${this.config.baseUrl}/hold/tasks/${taskId}/claim`,
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.TASKS.CLAIM(taskId)}`,
         {},
         {
           headers: {
@@ -361,33 +545,128 @@ class Fintopio {
           },
         }
       );
-      logger.info(`Task ${slug} complete, reward ${rewardAmount} diamonds!`);
+      logger.success(
+        `${colors.taskComplete}Task ${slug} complete, reward ${colors.faucetSuccess}${rewardAmount} diamonds${colors.reset}!${colors.reset}`
+      );
     } catch (error) {
-      logger.error(`Error claiming task: ${error.message}`);
+      logger.error(
+        `${colors.error}Error claiming task: ${error.message}${colors.reset}`
+      );
     }
   }
 
+  // =================== Diamond Methods ===================
+  async handleDiamonds(token, isFirstAccount) {
+    try {
+      const diamond = await this.getDiamondInfo(token);
+      if (!diamond) return;
+
+      if (diamond.state === "available") {
+        const randomWaitTime = this.generateRandomTime();
+        logger.info(
+          `${colors.timerWarn}Generated random wait time: ${randomWaitTime} seconds${colors.reset}`
+        );
+
+        await this.waitWithCountdown(randomWaitTime, "claim Diamonds", false);
+        await this.claimDiamond(
+          token,
+          diamond.diamondNumber,
+          diamond.settings.totalReward
+        );
+      } else if (diamond.timings?.nextAt) {
+        const nextDiamondTime = DateTime.fromMillis(
+          diamond.timings.nextAt
+        ).toLocaleString(DateTime.DATETIME_FULL);
+        logger.info(
+          `${colors.timerCount}Next Diamond time: ${nextDiamondTime}${colors.reset}`
+        );
+
+        if (isFirstAccount) {
+          this.state.firstAccountFinishTime = diamond.timings.nextAt;
+        }
+      }
+    } catch (error) {
+      logger.error(
+        `${colors.error}Error processing diamond info: ${error.message}${colors.reset}`
+      );
+    }
+  }
+
+  async getDiamondInfo(token) {
+    try {
+      const response = await axios.get(
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.DIAMOND.STATE}`,
+        {
+          headers: {
+            ...this.config.headers,
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return response.data?.state ? response.data : null;
+    } catch (error) {
+      logger.error(
+        `${colors.error}Error fetching diamond state: ${error.message}${colors.reset}`
+      );
+      return null;
+    }
+  }
+
+  async claimDiamond(token, diamondNumber, totalReward) {
+    try {
+      await axios.post(
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.DIAMOND.COMPLETE}`,
+        { diamondNumber },
+        {
+          headers: {
+            ...this.config.headers,
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      logger.success(
+        `${colors.faucetSuccess}Success claim ${totalReward} diamonds!${colors.reset}`
+      );
+    } catch (error) {
+      logger.error(
+        `${colors.error}Error claiming Diamond: ${error.message}${colors.reset}`
+      );
+    }
+  }
+
+  // =================== Leaderboard Methods ===================
   async getLeaderboards(token) {
     try {
       const [allTime, week, month] = await Promise.all([
-        axios.get(`${this.config.baseUrl}/hold/leaderboard?range=all`, {
-          headers: {
-            ...this.config.headers,
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-        axios.get(`${this.config.baseUrl}/hold/leaderboard?range=week`, {
-          headers: {
-            ...this.config.headers,
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-        axios.get(`${this.config.baseUrl}/hold/leaderboard?range=month`, {
-          headers: {
-            ...this.config.headers,
-            Authorization: `Bearer ${token}`,
-          },
-        }),
+        axios.get(
+          `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.LEADERBOARD.ALL_TIME}`,
+          {
+            headers: {
+              ...this.config.headers,
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        ),
+        axios.get(
+          `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.LEADERBOARD.WEEK}`,
+          {
+            headers: {
+              ...this.config.headers,
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        ),
+        axios.get(
+          `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.LEADERBOARD.MONTH}`,
+          {
+            headers: {
+              ...this.config.headers,
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        ),
       ]);
 
       return {
@@ -396,12 +675,49 @@ class Fintopio {
         month: month.data,
       };
     } catch (error) {
-      logger.error(`Error fetching leaderboards: ${error.message}`);
+      logger.error(
+        `${colors.error}Error fetching leaderboards: ${error.message}${colors.reset}`
+      );
       return null;
     }
   }
 
-  // Helper Methods
+  // =================== Inventory Methods ===================
+  async getGemsInventory(token) {
+    try {
+      const response = await axios.get(
+        `${this.config.baseUrl}${API_CONFIG.ENDPOINTS.INVENTORY.GEMS}`,
+        {
+          headers: {
+            ...this.config.headers,
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return response.data?.gems || [];
+    } catch (error) {
+      logger.error(
+        `${colors.error}Error fetching gems inventory: ${error.message}${colors.reset}`
+      );
+      return null;
+    }
+  }
+
+  async displayGemsInventory(token) {
+    const gems = await this.getGemsInventory(token);
+    if (!gems) return null;
+
+    return gems
+      .filter((gem) => parseInt(gem.count) > 0)
+      .map((gem) => ({
+        ...gem,
+        name: this.formatGemName(gem.name),
+        rarity: this.formatGemRarity(gem.rarity),
+      }));
+  }
+
+  // =================== Formatting Methods ===================
   formatGemRarity(rarity) {
     return rarity.toUpperCase();
   }
@@ -440,21 +756,8 @@ class Fintopio {
     const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     return `${formattedInteger}.${decimalPart}`;
   }
-  generateRandomTime() {
-    // Generate truly random time between 10-30 seconds
-    const minTime = 10;
-    const maxTime = 60;
 
-    // Add some noise to make it more random
-    const baseTime =
-      Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
-    const noise = Math.random() < 0.5 ? -2 : 2; // Random -2 or +2 seconds noise
-
-    // Ensure final time is within bounds
-    const finalTime = Math.max(minTime, Math.min(maxTime, baseTime + noise));
-    return finalTime;
-  }
-
+  // =================== Helper Methods ===================
   extractFirstName(userData) {
     try {
       const userPart = userData.match(/user=([^&]*)/)[1];
@@ -462,7 +765,9 @@ class Fintopio {
       const userObj = JSON.parse(decodedUserPart);
       return userObj.first_name || "Unknown";
     } catch (error) {
-      logger.error(`Error extracting first_name: ${error.message}`);
+      logger.error(
+        `${colors.error}Error extracting first_name: ${error.message}${colors.reset}`
+      );
       return "Unknown";
     }
   }
@@ -474,58 +779,28 @@ class Fintopio {
       const userObj = JSON.parse(decodedUserPart);
       return userObj.last_name || "";
     } catch (error) {
-      logger.error(`Error extracting last_name: ${error.message}`);
+      logger.error(
+        `${colors.error}Error extracting last_name: ${error.message}${colors.reset}`
+      );
       return "";
     }
   }
 
   calculateWaitTime(firstAccountFinishTime) {
-    if (!firstAccountFinishTime) return 5000; // Return 5 seconds instead of null
+    if (!firstAccountFinishTime) return 5000;
 
     const now = DateTime.now();
     const finishTime = DateTime.fromMillis(firstAccountFinishTime);
     const duration = finishTime.diff(now);
 
-    return Math.max(duration.as("milliseconds"), 5000); // Minimum 5 seconds wait
+    return Math.max(duration.as("milliseconds"), 5000);
   }
 
-  async getGemsInventory(token) {
-    try {
-      const response = await axios.get(
-        `${this.config.baseUrl}/hold/inventory/gems`,
-        {
-          headers: {
-            ...this.config.headers,
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-      return response.data?.gems || [];
-    } catch (error) {
-      logger.error(`Error fetching gems inventory: ${error.message}`);
-      return null;
-    }
-  }
-
-  async displayGemsInventory(token) {
-    const gems = await this.getGemsInventory(token);
-    if (!gems) return null;
-
-    return gems
-      .filter((gem) => parseInt(gem.count) > 0)
-      .map((gem) => ({
-        ...gem,
-        name: this.formatGemName(gem.name),
-        rarity: this.formatGemRarity(gem.rarity),
-      }));
-  }
-
-  // Main Process
+  // =================== Main Process ===================
   async processAccount(userData, accountIndex) {
     const fakeData = FakeDataGenerator.generateFakeData();
     this.config = {
-      baseUrl: "https://fintopio-tg.fintopio.com/api",
+      baseUrl: API_CONFIG.BASE_URL,
       headers: fakeData.headers,
     };
 
@@ -533,20 +808,45 @@ class Fintopio {
     const last_name = this.extractLastName(userData);
 
     // Header section
-    logger.info(`[ Account ${accountIndex + 1} | ${first_name} ${last_name} ]`);
-    logger.info("━━━━━━━━━ Device Info ━━━━━━━━━");
-    logger.info(`> Model: ${fakeData.deviceInfo.deviceModel}`);
-    logger.info(`> Platform: ${fakeData.deviceInfo.platform}`);
-    logger.info(`> Screen: ${fakeData.deviceInfo.screenResolution}`);
-    logger.info(`> GPU: ${fakeData.deviceInfo.webGLVendor}`);
-    logger.info(`> Fingerprint: ${fakeData.fingerprint.substring(0, 8)}...`);
-    logger.info(`> UA: ${this.formatUserAgent(fakeData.userAgent)}`);
-    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    logger.info(
+      `${colors.accountName}[ Account ${
+        accountIndex + 1
+      } | ${first_name} ${last_name} ]${colors.reset}`
+    );
+    logger.info(
+      `${colors.menuBorder}${FORMATTING.BORDERS.HEADER} Device Info ${FORMATTING.BORDERS.HEADER}${colors.reset}`
+    );
+    logger.info(
+      `${colors.accountInfo}> Model: ${fakeData.deviceInfo.deviceModel}${colors.reset}`
+    );
+    logger.info(
+      `${colors.accountInfo}> Platform: ${fakeData.deviceInfo.platform}${colors.reset}`
+    );
+    logger.info(
+      `${colors.accountInfo}> Screen: ${fakeData.deviceInfo.screenResolution}${colors.reset}`
+    );
+    logger.info(
+      `${colors.accountInfo}> GPU: ${fakeData.deviceInfo.webGLVendor}${colors.reset}`
+    );
+    logger.info(
+      `${colors.accountInfo}> Fingerprint: ${fakeData.fingerprint.substring(
+        0,
+        8
+      )}...${colors.reset}`
+    );
+    logger.info(
+      `${colors.accountInfo}> UA: ${this.formatUserAgent(fakeData.userAgent)}${
+        colors.reset
+      }`
+    );
+    logger.info(
+      `${colors.menuBorder}${FORMATTING.BORDERS.SECTION}${colors.reset}`
+    );
 
     const token = await this.auth(userData);
     if (!token) return;
 
-    logger.info("Login successful!");
+    logger.success(`${colors.taskComplete}Login successful!${colors.reset}`);
 
     const [profile, leaderboards] = await Promise.all([
       this.getProfile(token),
@@ -556,60 +856,75 @@ class Fintopio {
     if (!profile) return;
 
     // Account Info section
-    logger.info(`Balance: ${this.formatNumber(profile.balance)}`);
+    logger.info(
+      `${colors.accountInfo}Balance: ${this.formatNumber(profile.balance)}${
+        colors.reset
+      }`
+    );
 
     // Gems section
     const gems = await this.displayGemsInventory(token);
     if (gems) {
-      logger.info("━━━━━━━━━ Gems Info ━━━━━━━━━");
+      logger.info(
+        `${colors.menuBorder}${FORMATTING.BORDERS.HEADER} Gems Info ${FORMATTING.BORDERS.HEADER}${colors.reset}`
+      );
       gems.forEach((gem) => {
         logger.info(
-          `> ${gem.name} | Rarity: ${gem.rarity} | Count: ${gem.count}`
+          `${colors.accountInfo}> ${gem.name} | Rarity: ${gem.rarity} | Count: ${gem.count}${colors.reset}`
         );
       });
-      logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      logger.info(
+        `${colors.menuBorder}${FORMATTING.BORDERS.SECTION}${colors.reset}`
+      );
     }
 
     // Leaderboard section
     if (leaderboards) {
-      logger.info("━━━━━━━━ Leaderboards ━━━━━━━━");
+      logger.info(
+        `${colors.menuBorder}${FORMATTING.BORDERS.HEADER} Leaderboards ${FORMATTING.BORDERS.HEADER}${colors.reset}`
+      );
+
       const allTimeData = leaderboards.allTime?.user;
       if (allTimeData?.position) {
         logger.info(
-          this.formatLeaderboardInfo(
+          `${colors.accountInfo}${this.formatLeaderboardInfo(
             allTimeData.position,
             allTimeData.level?.name,
             "Referral Titans"
-          )
+          )}${colors.reset}`
         );
       }
 
       const weekData = leaderboards.week?.user;
       if (weekData?.position) {
         logger.info(
-          this.formatLeaderboardInfo(
+          `${colors.accountInfo}${this.formatLeaderboardInfo(
             weekData.position,
             weekData.level?.name,
             "Solo Legends (Week)"
-          )
+          )}${colors.reset}`
         );
       }
 
       const monthData = leaderboards.month?.user;
       if (monthData?.position) {
         logger.info(
-          this.formatLeaderboardInfo(
+          `${colors.accountInfo}${this.formatLeaderboardInfo(
             monthData.position,
             monthData.level?.name,
             "Solo Legends (Month)"
-          )
+          )}${colors.reset}`
         );
       }
-      logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      logger.info(
+        `${colors.menuBorder}${FORMATTING.BORDERS.SECTION}${colors.reset}`
+      );
     }
 
     // Daily Activities section
-    logger.info("━━━━━━━━ Daily Activities ━━━━━━━━");
+    logger.info(
+      `${colors.menuBorder}${FORMATTING.BORDERS.HEADER} Daily Activities ${FORMATTING.BORDERS.HEADER}${colors.reset}`
+    );
 
     // Do daily check-in first
     await this.checkInDaily(token);
@@ -619,13 +934,16 @@ class Fintopio {
       this.handleDiamonds(token, accountIndex === 0),
       this.handleFarming(token),
       this.handleTasks(token),
+      this.handleSpaceTapper(token),
     ]);
 
-    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    logger.info(
+      `${colors.menuBorder}${FORMATTING.BORDERS.SECTION}${colors.reset}`
+    );
   }
 
   async main() {
-    printBanner();
+    displayBanner();
 
     while (true) {
       const dataFile = path.join(__dirname, "data.txt");
@@ -644,10 +962,13 @@ class Fintopio {
   }
 }
 
+// Bootstrap
 if (require.main === module) {
   const fintopio = new Fintopio();
   fintopio.main().catch((err) => {
-    logger.error(err);
+    logger.error(`${colors.error}${err}${colors.reset}`);
     process.exit(1);
   });
 }
+
+module.exports = Fintopio;
