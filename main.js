@@ -62,12 +62,12 @@ const TIME_CONFIG = {
       MAX: 45,
     },
     WAIT_TIME: {
-      MIN: 30,
-      MAX: 120,
+      MIN: 10,
+      MAX: 60,
     },
     BETWEEN_GAMES: {
-      MIN: 180,
-      MAX: 300,
+      MIN: 10,
+      MAX: 60,
     },
     SCORE: {
       MIN_PERCENT: 70,
